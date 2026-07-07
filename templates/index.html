@@ -1,0 +1,113 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="wheel-wrap">
+  {% if pick %}
+    {% if revealed %}
+      <article class="redacted-card" style="border-style: solid;">
+        <h3>🎉 It's revealed: {{ pick['title'] }}</h3>
+        {% if pick['description'] %}<p>{{ pick['description'] }}</p>{% endif %}
+        <p>
+          {% if pick['location'] %}<span class="badge">📍 {{ pick['location'] }}</span>{% endif %}
+          {% if pick['booked_date'] %}<span class="badge">📅 {{ pick['booked_date'] }}</span>{% endif %}
+          {% if pick['url'] %}<a href="{{ pick['url'] }}" target="_blank" rel="noopener">More info ↗</a>{% endif %}
+        </p>
+      </article>
+    {% else %}
+      <article class="redacted-card">
+        <h3>🤫 Your next date is picked!</h3>
+        <p class="muted">What it is stays a secret. What you need to know:</p>
+        <p>
+          <span class="badge">👗 {{ redacted['dress_code'] }}</span>
+          {% if redacted['duration_hours'] %}<span class="badge">⏱ ~{{ redacted['duration_hours'] }}h</span>{% endif %}
+          {% if redacted['travel_minutes'] %}<span class="badge">🚗 {{ redacted['travel_minutes'] }} min travel</span>{% endif %}
+          <span class="badge">🍽 {{ redacted['dinner'] }}</span>
+          <span class="badge">🏷 {{ redacted['category'] }}</span>
+        </p>
+        {% if pick['booked_date'] %}
+          <p class="muted">Booked for <strong>{{ pick['booked_date'] }}</strong>. Details reveal shortly before.</p>
+        {% elif pick['pinned'] %}
+          <p class="muted">Pinned! Waiting to be booked.</p>
+        {% else %}
+          <p class="muted">Fresh off the wheel. The planner still has to pin and book it.</p>
+        {% endif %}
+      </article>
+    {% endif %}
+  {% endif %}
+
+  <canvas id="wheel" width="420" height="420"></canvas>
+  <button id="spinBtn" {% if segment_count == 0 %}disabled{% endif %}>
+    {% if segment_count == 0 %}No eligible ideas yet{% else %}Spin the wheel ({{ segment_count }} mystery dates){% endif %}
+  </button>
+  <p class="muted">Every slice is a secret. The wheel decides, the planner books, you find out just in time. 💘</p>
+</section>
+
+<script>
+const COUNT = {{ segment_count }};
+const canvas = document.getElementById('wheel');
+const ctx = canvas.getContext('2d');
+const R = canvas.width / 2;
+const COLORS = ['#e63946','#f4a261','#2a9d8f','#457b9d','#9b5de5','#f15bb5','#00bbf9','#fee440'];
+let angle = 0;
+
+function draw() {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  if (COUNT === 0) {
+    ctx.beginPath(); ctx.arc(R, R, R - 8, 0, Math.PI * 2);
+    ctx.fillStyle = '#33333355'; ctx.fill();
+    return;
+  }
+  const slice = (Math.PI * 2) / COUNT;
+  for (let i = 0; i < COUNT; i++) {
+    const start = angle + i * slice;
+    ctx.beginPath();
+    ctx.moveTo(R, R);
+    ctx.arc(R, R, R - 8, start, start + slice);
+    ctx.closePath();
+    ctx.fillStyle = COLORS[i % COLORS.length];
+    ctx.fill();
+    ctx.strokeStyle = '#00000033'; ctx.stroke();
+    // mystery label
+    ctx.save();
+    ctx.translate(R, R);
+    ctx.rotate(start + slice / 2);
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 22px system-ui';
+    ctx.textAlign = 'right';
+    ctx.fillText('?', R - 30, 8);
+    ctx.restore();
+  }
+  // pointer
+  ctx.beginPath();
+  ctx.moveTo(R - 14, 2); ctx.lineTo(R + 14, 2); ctx.lineTo(R, 34);
+  ctx.closePath();
+  ctx.fillStyle = '#fff'; ctx.fill(); ctx.strokeStyle = '#000'; ctx.stroke();
+}
+draw();
+
+document.getElementById('spinBtn')?.addEventListener('click', async () => {
+  const btn = document.getElementById('spinBtn');
+  btn.disabled = true;
+  const res = await fetch('/spin', { method: 'POST' });
+  if (!res.ok) { alert((await res.json()).error || 'Spin failed'); btn.disabled = false; return; }
+  const data = await res.json();
+  const slice = (Math.PI * 2) / data.count;
+  // pointer is at top (-90deg). Land segment center under the pointer.
+  const target = -Math.PI / 2 - (data.segment * slice + slice / 2);
+  const turns = 6 * Math.PI * 2;
+  const from = angle;
+  const delta = ((target - from) % (Math.PI * 2) + Math.PI * 2) % (Math.PI * 2);
+  const dest = from + turns + delta;
+  const start = performance.now();
+  const DURATION = 4200;
+  function frame(now) {
+    const t = Math.min((now - start) / DURATION, 1);
+    const ease = 1 - Math.pow(1 - t, 3);
+    angle = from + (dest - from) * ease;
+    draw();
+    if (t < 1) requestAnimationFrame(frame);
+    else setTimeout(() => location.reload(), 900);
+  }
+  requestAnimationFrame(frame);
+});
+</script>
+{% endblock %}

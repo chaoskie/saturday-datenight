@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% block title %}Planner login{% endblock %}
+{% block content %}
+<article style="max-width: 24rem; margin: 3rem auto;">
+  <h2>🔐 Planner mode</h2>
+  <p class="muted">No peeking! Planner mode shows all the secrets.</p>
+  <form method="post">
+    <input type="password" name="passcode" placeholder="Passcode" autofocus required>
+    {% if error %}<small style="color: var(--pico-del-color);">{{ error }}</small>{% endif %}
+    <button type="submit">Unlock</button>
+  </form>
+</article>
+{% endblock %}

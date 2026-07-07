@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Saturday Datenight{% endblock %}</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎡</text></svg>">
+  <link rel="stylesheet" href="{{ url_for('static', filename='pico.min.css') }}">
+  <script src="{{ url_for('static', filename='htmx.min.js') }}" defer></script>
+  <style>
+    :root { --pico-font-family: system-ui, sans-serif; }
+    .wheel-wrap { display: flex; flex-direction: column; align-items: center; gap: 1rem; }
+    canvas { max-width: 100%; }
+    .redacted-card { border: 2px dashed var(--pico-primary); border-radius: 1rem; padding: 1.25rem 1.5rem; }
+    .redacted-card h3 { margin-bottom: .5rem; }
+    .badge { display: inline-block; padding: .15rem .6rem; border-radius: 999px;
+             background: var(--pico-primary-background); color: var(--pico-primary-inverse);
+             font-size: .8rem; margin-right: .35rem; }
+    .muted { color: var(--pico-muted-color); }
+    table td, table th { vertical-align: top; }
+    details.idea-row { margin-bottom: .25rem; }
+    .banned { opacity: .45; text-decoration: line-through; }
+  </style>
+</head>
+<body>
+  <main class="container">
+    <nav>
+      <ul><li><strong>🎡 Saturday Datenight</strong></li></ul>
+      <ul>
+        <li><a href="{{ url_for('index') }}">Wheel</a></li>
+        {% if session.get('planner') %}
+          <li><a href="{{ url_for('planner') }}">Planner</a></li>
+          <li><a href="{{ url_for('logout') }}">Lock</a></li>
+        {% else %}
+          <li><a href="{{ url_for('login') }}">Planner</a></li>
+        {% endif %}
+      </ul>
+    </nav>
+    {% block content %}{% endblock %}
+  </main>
+</body>
+</html>

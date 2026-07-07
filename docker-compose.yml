@@ -1,0 +1,12 @@
+services:
+  datenight:
+    build: .
+    ports:
+      - "5000:5000"
+    environment:
+      PLANNER_PASSCODE: ${PLANNER_PASSCODE:?set a passcode}
+      SECRET_KEY: ${SECRET_KEY:?set a random secret}
+      AUTO_REVEAL_HOURS: ${AUTO_REVEAL_HOURS:-24}
+    volumes:
+      - ./data:/data
+    restart: unless-stopped
