@@ -21,6 +21,8 @@ PASSCODE = os.environ.get("PLANNER_PASSCODE", "changeme")
 SECRET_KEY = os.environ.get("SECRET_KEY", "dev-secret-change-me")
 # Hours before the booked date at which the redacted pick auto-reveals (0 = only on the day itself)
 AUTO_REVEAL_HOURS = int(os.environ.get("AUTO_REVEAL_HOURS", "24"))
+# Deployed version, overridable at build/run time (e.g. a git short SHA) for deploy verification
+APP_VERSION = os.environ.get("APP_VERSION", "1.0.0")
 
 DRESS_CODES = ["casual", "smart casual", "fancy", "sporty", "swimwear", "outdoor/weatherproof"]
 
@@ -158,6 +160,17 @@ def redacted(idea):
 
 # ---------- public routes ----------
 
+@app.get("/healthz")
+def healthz():
+    """Liveness/readiness probe. Confirms the SQLite volume is reachable and
+    reports the running version so deploys can verify what is actually live."""
+    try:
+        get_db().execute("SELECT 1")
+    except sqlite3.Error as exc:
+        return jsonify({"status": "error", "version": APP_VERSION, "db": str(exc)}), 503
+    return jsonify({"status": "ok", "version": APP_VERSION})
+
+
 @app.route("/")
 def index():
     db = get_db()
@@ -188,11 +201,16 @@ def spin():
     weights = [idea_weight(i) for i in ideas]
     chosen_index = random.choices(range(len(ideas)), weights=weights, k=1)[0]
     idea = ideas[chosen_index]
-    db.execute("DELETE FROM picks WHERE pinned = 0 AND done = 0")  # replace unpinned previous spin
-    db.execute("INSERT INTO picks (idea_id) VALUES (?)", (idea["id"],))
-    db.execute("UPDATE ideas SET last_picked_at = datetime('now') WHERE id = ?", (idea["id"],))
-    db.commit()
+    _record_pick(db, idea["id"])
     return jsonify({"segment": chosen_index, "count": len(ideas), "redacted": redacted(idea)})
+
+
+def _record_pick(db, idea_id):
+    """Replace any unpinned live spin with a new pick for idea_id."""
+    db.execute("DELETE FROM picks WHERE pinned = 0 AND done = 0")
+    db.execute("INSERT INTO picks (idea_id) VALUES (?)", (idea_id,))
+    db.execute("UPDATE ideas SET last_picked_at = datetime('now') WHERE id = ?", (idea_id,))
+    db.commit()
 
 
 # ---------- planner auth ----------
@@ -227,7 +245,7 @@ def planner():
     ).fetchall()
     today = date.today().isoformat()
     return render_template("planner.html", ideas=ideas, picks=picks, today=today,
-                           dress_codes=DRESS_CODES)
+                           dress_codes=DRESS_CODES, eligible=eligible_ideas(db))
 
 
 def idea_from_form(form):
@@ -304,6 +322,19 @@ def delete_idea(idea_id):
     db = get_db()
     db.execute("DELETE FROM ideas WHERE id = ?", (idea_id,))
     db.commit()
+    return redirect(url_for("planner"))
+
+
+@app.post("/planner/pick")
+@planner_required
+def manual_pick():
+    idea_id = request.form.get("idea_id", "").strip()
+    if not idea_id.isdigit():
+        return redirect(url_for("planner"))
+    db = get_db()
+    idea = db.execute("SELECT id FROM ideas WHERE id = ?", (int(idea_id),)).fetchone()
+    if idea:
+        _record_pick(db, idea["id"])
     return redirect(url_for("planner"))
 
 

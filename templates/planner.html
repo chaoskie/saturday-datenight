@@ -2,6 +2,24 @@
 {% block title %}Planner{% endblock %}
 {% block content %}
 
+<h2>Pick a date (no wheel)</h2>
+<form method="post" action="{{ url_for('manual_pick') }}">
+  <div class="grid">
+    <select name="idea_id" required {% if not eligible %}disabled{% endif %}>
+      {% if eligible %}
+        <option value="" disabled selected>Choose an idea…</option>
+        {% for i in eligible %}
+          <option value="{{ i['id'] }}">{{ i['title'] }}{% if i['category'] %} · {{ i['category'] }}{% endif %}</option>
+        {% endfor %}
+      {% else %}
+        <option value="" disabled selected>No eligible ideas</option>
+      {% endif %}
+    </select>
+    <button type="submit" {% if not eligible %}disabled{% endif %}>🎯 Pick this one</button>
+  </div>
+  <p class="muted">Sets the current pick directly, replacing any fresh (unpinned) spin. Then pin/book/reveal below as usual.</p>
+</form>
+
 <h2>Current picks</h2>
 {% if picks %}
   <table>
