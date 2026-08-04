@@ -107,6 +107,7 @@
 <details class="idea-row {% if i['banned'] %}banned{% endif %}">
   <summary>
     <strong>{{ i['title'] }}</strong>
+    {% if i['rigged_next'] %}<span class="badge">🎯 rigged for next spin</span>{% endif %}
     {% if i['limited_until'] %}<span class="badge">⏳ until {{ i['limited_until'] }}</span>{% endif %}
     {% if i['price_eur'] is not none %}<span class="badge">€{{ '%.0f'|format(i['price_eur']) }}</span>{% endif %}
     <span class="badge">{{ i['category'] }}</span>
@@ -144,6 +145,9 @@
       <button type="submit">Save</button>
       <button formaction="{{ url_for('toggle_ban', idea_id=i['id']) }}" class="outline secondary">
         {% if i['banned'] %}♻️ Unban{% else %}🚫 Ban from wheel{% endif %}
+      </button>
+      <button formaction="{{ url_for('rig_idea', idea_id=i['id']) }}" class="outline secondary">
+        {% if i['rigged_next'] %}🎯 Un-rig{% else %}🎁 Rig next spin{% endif %}
       </button>
       <button formaction="{{ url_for('delete_idea', idea_id=i['id']) }}" class="outline secondary"
               onclick="return confirm('Delete this idea?')">🗑 Delete</button>

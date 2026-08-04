@@ -8,6 +8,8 @@ import json
 import os
 import random
 import sqlite3
+import urllib.error
+import urllib.request
 from datetime import date, datetime, timedelta
 from functools import wraps
 from pathlib import Path
@@ -23,6 +25,13 @@ SECRET_KEY = os.environ.get("SECRET_KEY", "dev-secret-change-me")
 AUTO_REVEAL_HOURS = int(os.environ.get("AUTO_REVEAL_HOURS", "24"))
 # Deployed version, overridable at build/run time (e.g. a git short SHA) for deploy verification
 APP_VERSION = os.environ.get("APP_VERSION", "1.0.0")
+# Days before limited_until at which an idea counts as "expiring soon".
+# Shared by the wheel-weight boost and the expiry ping so they stay in step.
+EXPIRY_WARNING_DAYS = int(os.environ.get("EXPIRY_WARNING_DAYS", "14"))
+# ntfy push channel for expiring limited-time ideas. Both must be set or the
+# expiry ping stays disabled (no external calls, no errors).
+NTFY_URL = os.environ.get("NTFY_URL", "").rstrip("/")
+NTFY_TOPIC = os.environ.get("NTFY_TOPIC", "")
 
 DRESS_CODES = ["casual", "smart casual", "fancy", "sporty", "swimwear", "outdoor/weatherproof"]
 
@@ -48,6 +57,8 @@ CREATE TABLE IF NOT EXISTS ideas (
     rating INTEGER,                           -- 1-5 after doing it
     times_done INTEGER DEFAULT 0,
     last_picked_at TEXT,
+    rigged_next INTEGER DEFAULT 0,            -- planner-only: force the next spin onto this idea (one-shot)
+    expiry_notified_at TEXT,                  -- ISO datetime of the expiry ping; NULL = not yet sent
     created_at TEXT DEFAULT (datetime('now'))
 );
 CREATE TABLE IF NOT EXISTS picks (
@@ -78,10 +89,21 @@ def close_db(_exc):
         db.close()
 
 
+# Idempotent column adds for databases created before these columns existed.
+MIGRATIONS = [
+    ("ideas", "rigged_next", "INTEGER DEFAULT 0"),
+    ("ideas", "expiry_notified_at", "TEXT"),
+]
+
+
 def init_db():
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     with sqlite3.connect(DB_PATH) as db:
         db.executescript(SCHEMA)
+        for table, column, decl in MIGRATIONS:
+            existing = {row[1] for row in db.execute(f"PRAGMA table_info({table})")}
+            if column not in existing:
+                db.execute(f"ALTER TABLE {table} ADD COLUMN {column} {decl}")
 
 
 def planner_required(f):
@@ -113,7 +135,7 @@ def idea_weight(idea):
     if idea["limited_until"]:
         try:
             days_left = (date.fromisoformat(idea["limited_until"]) - date.today()).days
-            if days_left <= 14:
+            if days_left <= EXPIRY_WARNING_DAYS:
                 w *= 3.0
             elif days_left <= 45:
                 w *= 1.8
@@ -158,6 +180,63 @@ def redacted(idea):
     }
 
 
+# ---------- expiry ping (ntfy) ----------
+
+def ideas_expiring_soon(db, days=None):
+    """Un-banned, not-yet-notified limited-time ideas expiring within `days`."""
+    if days is None:
+        days = EXPIRY_WARNING_DAYS
+    return db.execute(
+        """SELECT * FROM ideas
+           WHERE banned = 0
+             AND limited_until IS NOT NULL AND limited_until != ''
+             AND limited_until >= date('now')
+             AND julianday(limited_until) - julianday('now') <= ?
+             AND expiry_notified_at IS NULL""",
+        (days,),
+    ).fetchall()
+
+
+def notify_expiring(idea, days_left):
+    """Send one ntfy push for an idea about to expire. Returns True on success."""
+    if not (NTFY_URL and NTFY_TOPIC):
+        return False
+    plural = "s" if days_left != 1 else ""
+    body = (f"'{idea['title']}' expires {idea['limited_until']}"
+            f" ({days_left} day{plural} left). Book it or lose it.")
+    req = urllib.request.Request(
+        f"{NTFY_URL}/{NTFY_TOPIC}",
+        data=body.encode("utf-8"),
+        headers={"Title": "Date idea expiring soon", "Tags": "hourglass"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=5):
+            return True
+    except (urllib.error.URLError, OSError):
+        return False
+
+
+def check_expiry_notifications(db):
+    """On-request expiry check (no cron): ping once per idea per limited_until.
+
+    Marks expiry_notified_at only after a successful send, so failures retry
+    on the next request. update_idea() resets the mark when limited_until
+    changes, re-arming the ping for the new date.
+    """
+    if not (NTFY_URL and NTFY_TOPIC):
+        return
+    for idea in ideas_expiring_soon(db):
+        try:
+            days_left = (date.fromisoformat(idea["limited_until"]) - date.today()).days
+        except ValueError:
+            continue
+        if notify_expiring(idea, days_left):
+            db.execute("UPDATE ideas SET expiry_notified_at = datetime('now') WHERE id = ?",
+                       (idea["id"],))
+            db.commit()
+
+
 # ---------- public routes ----------
 
 @app.get("/healthz")
@@ -174,6 +253,7 @@ def healthz():
 @app.route("/")
 def index():
     db = get_db()
+    check_expiry_notifications(db)
     ideas = eligible_ideas(db)
     pick = db.execute(
         "SELECT p.*, i.title, i.description, i.url, i.location, i.price_eur, i.travel_minutes,"
@@ -198,8 +278,18 @@ def spin():
     ideas = eligible_ideas(db)
     if not ideas:
         return jsonify({"error": "No eligible date ideas. Add some in planner mode!"}), 400
-    weights = [idea_weight(i) for i in ideas]
-    chosen_index = random.choices(range(len(ideas)), weights=weights, k=1)[0]
+    rigged = next((i for i in ideas if i["rigged_next"]), None)
+    # A rig is one-shot: clear it unconditionally so it never survives past one
+    # spin, even if the rigged idea became ineligible (banned/expired/pinned)
+    # in the meantime. Committed by _record_pick() below.
+    db.execute("UPDATE ideas SET rigged_next = 0 WHERE rigged_next != 0")
+    if rigged is not None:
+        # eligible_ideas() already filtered out banned/expired/pinned ideas,
+        # so an ineligible rig falls back to the fair path automatically.
+        chosen_index = ideas.index(rigged)
+    else:
+        weights = [idea_weight(i) for i in ideas]
+        chosen_index = random.choices(range(len(ideas)), weights=weights, k=1)[0]
     idea = ideas[chosen_index]
     _record_pick(db, idea["id"])
     return jsonify({"segment": chosen_index, "count": len(ideas), "redacted": redacted(idea)})
@@ -238,6 +328,7 @@ def logout():
 @planner_required
 def planner():
     db = get_db()
+    check_expiry_notifications(db)
     ideas = db.execute("SELECT * FROM ideas ORDER BY banned, limited_until IS NULL, limited_until, title").fetchall()
     picks = db.execute(
         "SELECT p.*, i.title FROM picks p JOIN ideas i ON i.id = p.idea_id"
@@ -296,6 +387,7 @@ def update_idea(idea_id):
     d = idea_from_form(request.form)
     d["id"] = idea_id
     db = get_db()
+    old = db.execute("SELECT limited_until FROM ideas WHERE id = ?", (idea_id,)).fetchone()
     db.execute(
         """UPDATE ideas SET title=:title, description=:description, url=:url, location=:location,
            price_eur=:price_eur, travel_minutes=:travel_minutes, duration_hours=:duration_hours,
@@ -303,6 +395,9 @@ def update_idea(idea_id):
            available_dates=:available_dates, category=:category WHERE id=:id""",
         d,
     )
+    # A changed limited_until makes any earlier expiry ping stale: re-arm it.
+    if old is not None and (old["limited_until"] or None) != d["limited_until"]:
+        db.execute("UPDATE ideas SET expiry_notified_at = NULL WHERE id = ?", (idea_id,))
     db.commit()
     return redirect(url_for("planner"))
 
@@ -312,6 +407,21 @@ def update_idea(idea_id):
 def toggle_ban(idea_id):
     db = get_db()
     db.execute("UPDATE ideas SET banned = 1 - banned WHERE id = ?", (idea_id,))
+    db.commit()
+    return redirect(url_for("planner"))
+
+
+@app.post("/planner/ideas/<int:idea_id>/rig")
+@planner_required
+def rig_idea(idea_id):
+    """Toggle the one-shot rig; at most one idea is rigged at a time."""
+    db = get_db()
+    row = db.execute("SELECT rigged_next FROM ideas WHERE id = ?", (idea_id,)).fetchone()
+    if row is None:
+        abort(404)
+    db.execute("UPDATE ideas SET rigged_next = 0 WHERE rigged_next != 0")
+    if not row["rigged_next"]:
+        db.execute("UPDATE ideas SET rigged_next = 1 WHERE id = ?", (idea_id,))
     db.commit()
     return redirect(url_for("planner"))
 

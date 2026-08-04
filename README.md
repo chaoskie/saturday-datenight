@@ -18,6 +18,8 @@ Every couples app out there is a cloud subscription, and none of them keep the p
 - **Rate and repeat**: after the date, mark it done with a 1-5 rating. Ban ideas from the wheel without deleting them.
 - **Import/export**: back up your ideas as JSON. A starter pack of ~24 Netherlands date ideas ships in `seeds/nl-date-ideas.json`.
 - **No accounts**: the public view is for both of you; planner mode is behind a single passcode. Built for a trusted home network.
+- **Rigged spin**: a planner-only "Rig next spin" toggle forces the next wheel spin to land on a chosen idea. The animation is identical to a fair spin, nothing shows on the public page, and the rig is consumed after exactly one spin.
+- **Expiry ping**: optionally get an ntfy push when a limited-time idea is about to expire (checked whenever the app is opened, one ping per idea per expiry date).
 
 ## Quick start
 
@@ -44,6 +46,16 @@ Then log into planner mode and import `seeds/nl-date-ideas.json` to get started.
 | `SECRET_KEY` | dev value | Flask session secret. Set to a random string. |
 | `AUTO_REVEAL_HOURS` | `24` | Hours before the booked date at which the pick auto-reveals. `0` reveals on the day itself. |
 | `DATENIGHT_DB` | `./data/datenight.db` | SQLite database path. |
+| `NTFY_URL` | empty | Base URL of an ntfy server (e.g. `https://ntfy.sh` or a self-hosted instance). Empty disables the expiry ping. |
+| `NTFY_TOPIC` | empty | ntfy topic for expiry pings. On public ntfy.sh, use a hard-to-guess suffix; subscribe with the planner's phone only. |
+| `EXPIRY_WARNING_DAYS` | `14` | Days before `limited_until` at which an idea counts as expiring soon (drives the wheel-odds boost and the expiry ping). |
+
+## Development
+
+```bash
+pip install -r requirements-dev.txt
+pytest
+```
 
 ## Security note
 
