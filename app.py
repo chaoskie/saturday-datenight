@@ -25,6 +25,12 @@ SECRET_KEY = os.environ.get("SECRET_KEY", "dev-secret-change-me")
 AUTO_REVEAL_HOURS = int(os.environ.get("AUTO_REVEAL_HOURS", "24"))
 # Deployed version, overridable at build/run time (e.g. a git short SHA) for deploy verification
 APP_VERSION = os.environ.get("APP_VERSION", "1.0.0")
+# Build identity for the /version endpoint. Wired from the homelab build
+# agent's GIT_REV/BUILD_TIME env via docker-compose (see COMMIT_SHA/BUILD_TIME
+# below); falls back to "dev"/"unknown" for local runs.
+COMMIT_SHA = os.environ.get("COMMIT_SHA", "dev")
+BUILD_TIME = os.environ.get("BUILD_TIME", "unknown")
+ENVIRONMENT = os.environ.get("ENVIRONMENT", "live")
 # Days before limited_until at which an idea counts as "expiring soon".
 # Shared by the wheel-weight boost and the expiry ping so they stay in step.
 EXPIRY_WARNING_DAYS = int(os.environ.get("EXPIRY_WARNING_DAYS", "14"))
@@ -248,6 +254,17 @@ def healthz():
     except sqlite3.Error as exc:
         return jsonify({"status": "error", "version": APP_VERSION, "db": str(exc)}), 503
     return jsonify({"status": "ok", "version": APP_VERSION})
+
+
+@app.get("/version")
+def version():
+    """Build identity for deploy verification. No auth, no DB access."""
+    return jsonify({
+        "version": APP_VERSION,
+        "commit_sha": COMMIT_SHA,
+        "environment": ENVIRONMENT,
+        "build_time": BUILD_TIME,
+    })
 
 
 @app.route("/")

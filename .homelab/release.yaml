@@ -1,0 +1,53 @@
+# Homelab release manifest for saturday-datenight.
+#
+# Read by the build agent on the ASUS (HOMELAB-32) at build + deploy time.
+# Same pattern as the claude-tg-bot, next-up and leave-by manifests.
+#
+# Single stage `live`: the build agent refuses the literal name `production`
+# at the agent level, and saturday-datenight is a 1-of-1 deploy on the ASUS.
+# Profile-2 compose-build-in-place so the existing checkout tracks main; the
+# agent fetches + checks out the target sha + compose up -d --build in place.
+#
+# Placeholders (${VAR}) resolve from ~/.config/release/saturday-datenight/live.env
+# on the ASUS (mode 600). Available keys: PROJECT_NAME, PLANE_PROJECT_KEY,
+# LIVE_PATH, HEALTHCHECK_URL, VERSION_URL. ${SHORT_SHA} / ${COMMIT_SHA} are
+# bound by the agent at deploy time.
+#
+# HOMELAB-59: added /healthz and /version (COMMIT_SHA/BUILD_TIME wired via
+# docker-compose from the agent's GIT_REV/BUILD_TIME). Registry HEALTHCHECK_URL
+# should move from the HTML root to /version once deployed (host-side change,
+# not in this repo) so `/deployed` reports the sha.
+
+name: ${PROJECT_NAME}
+plane_project_key: ${PLANE_PROJECT_KEY}
+
+build:
+  compose_file: docker-compose.yml
+  build_args: []
+
+stages:
+  live:
+    asus_path: ${LIVE_PATH}
+    healthcheck: ${HEALTHCHECK_URL}
+    healthcheck_timeout_s: 60
+    compose_file: docker-compose.yml
+    project_name: saturday-datenight
+
+post_deploy_checks:
+  # 1. Liveness. /healthz returns 200 once the container is healthy.
+  - name: http_200
+    type: http_status
+    expect: 200
+    url: ${HEALTHCHECK_URL}
+
+  # 2. Version match. Confirms the LIVE container is actually running the sha
+  # the agent just deployed. The agent substitutes ${COMMIT_SHA} = the full
+  # 40-char sha it checked out; /version returns commit_sha from COMMIT_SHA
+  # (compose maps GIT_REV -> COMMIT_SHA at `compose up`). Requires VERSION_URL
+  # in the per-stage live.env, e.g. same host:port as HEALTHCHECK_URL with
+  # /version instead of the HTML root.
+  - name: commit_sha_matches
+    type: http_json_field_matches
+    url: ${VERSION_URL}
+    field: commit_sha
+    expected: ${COMMIT_SHA}
