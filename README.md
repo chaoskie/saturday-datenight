@@ -49,6 +49,14 @@ Then log into planner mode and import `seeds/nl-date-ideas.json` to get started.
 | `NTFY_URL` | empty | Base URL of an ntfy server (e.g. `https://ntfy.sh` or a self-hosted instance). Empty disables the expiry ping. |
 | `NTFY_TOPIC` | empty | ntfy topic for expiry pings. On public ntfy.sh, use a hard-to-guess suffix; subscribe with the planner's phone only. |
 | `EXPIRY_WARNING_DAYS` | `14` | Days before `limited_until` at which an idea counts as expiring soon (drives the wheel-odds boost and the expiry ping). |
+| `APP_VERSION` | `1.0.0` | Release tag reported by `/healthz` and `/version`. |
+| `COMMIT_SHA` | `dev` | Git commit sha reported by `/version`; wired from the deploy agent's `GIT_REV` at build/run time. |
+| `BUILD_TIME` | `unknown` | ISO 8601 build timestamp reported by `/version`; wired from the deploy agent's `BUILD_TIME`. |
+| `ENVIRONMENT` | `live` | Environment label reported by `/version`. |
+
+## Deploy verification
+
+`GET /healthz` is a cheap, unauthenticated liveness probe (`{"status": "ok", ...}`). `GET /version` is a cheap, unauthenticated JSON endpoint reporting `version`, `commit_sha`, `environment` and `build_time`, so the homelab deploy tooling can confirm which build is actually running after a deploy.
 
 ## Development
 

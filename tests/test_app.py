@@ -54,6 +54,34 @@ def days_from_now(n):
     return (date.today() + timedelta(days=n)).isoformat()
 
 
+# ---------- deploy contract: /healthz + /version ----------
+
+def test_healthz_returns_200_ok_no_auth(client):
+    resp = client.get("/healthz")
+    assert resp.status_code == 200
+    assert resp.get_json()["status"] == "ok"
+
+
+def test_version_returns_build_identity_no_auth(client, monkeypatch):
+    monkeypatch.setattr(datenight, "COMMIT_SHA", "abc1234")
+    monkeypatch.setattr(datenight, "BUILD_TIME", "2026-08-09T00:00:00Z")
+    monkeypatch.setattr(datenight, "ENVIRONMENT", "live")
+    resp = client.get("/version")
+    assert resp.status_code == 200
+    body = resp.get_json()
+    assert body["commit_sha"] == "abc1234"
+    assert body["build_time"] == "2026-08-09T00:00:00Z"
+    assert body["environment"] == "live"
+    assert "version" in body
+
+
+def test_version_defaults_when_unset(client):
+    resp = client.get("/version")
+    body = resp.get_json()
+    assert body["commit_sha"] == "dev"
+    assert body["build_time"] == "unknown"
+
+
 # ---------- migration ----------
 
 def test_init_db_adds_columns_to_pre_v2_database(tmp_path, monkeypatch):
